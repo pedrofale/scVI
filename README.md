@@ -1,4 +1,4 @@
-# scVI
+# Understanding scVI
 
 ### Title
 A deep generative model for gene expression profiles
