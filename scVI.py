@@ -1,17 +1,54 @@
 """
-Code for the paper single-cell Variational Inference (scVI) paper
+Implementation of the paper single-cell Variational Inference (scVI) paper
+without extensions by Pedro Ferreira
 
 Romain Lopez, Jeffrey Regier, Michael Cole, Michael Jordan, Nir Yosef
 EECS, UC Berkeley
 
 """
 
-
 import functools
 import tensorflow as tf
 import numpy as np
 from tensorflow.contrib import slim
 
+import tensorflow as tf
+
+class scVI(object):
+    def __init__(self, n_input=100, n_layers=1, n_hidden=128, n_latent=2):
+        self.n_input = n_input
+        self.n_layers = n_layers
+        self.n_hidden = n_hidden
+        self.n_latent = n_latent
+
+        self.build_model() # build computation graph
+
+        self.sess = tf.InteractiveSession()
+        self.sess.run(tf.global_variables_initializer())
+
+    def build_model(self):
+        self.x = tf.placeholder(name='x', dtype=tf.float32, shape=[None, self.n_input])
+
+        self.inference_network() # q(z|x)
+        self.sampling_latent()
+        self.generative_model() # p(x|z)
+        self.loss() # update network weights
+
+    def variational_distribution(self):
+        """
+        defines the inference network of the model, q(z|x)
+        """
+
+        h = dense(x, self.n_hidden, activation=tf.nn.relu, \
+                  bn=True, keep_prob=self.dropout_rate, phase=self.training_phase)
+        for layer in range(2, self.n_layers + 1):
+            h = dense(h, self.n_hidden, activation=tf.nn.relu, \
+                      bn=True, keep_prob=self.dropout_rate, phase=self.training_phase)
+
+        self.qz_m = dense(h, self.n_latent, activation=None, \
+                          bn=False, keep_prob=None, phase=self.training_phase)
+        self.qz_v = dense(h, self.n_latent, activation=tf.exp, \
+                          bn=False, keep_prob=None, phase=self.training_phase)
 
 def dense(x, 
           num_outputs,
@@ -138,79 +175,6 @@ def define_scope(function, scope=None, *args, **kwargs):
                 setattr(self, attribute, function(self))
         return getattr(self, attribute)
     return decorator
-
-def mmd_fourier(x1, x2, bandwidth=2., dim_r=500):
-    """
-    Approximate RBF kernel by random features
-
-    Notes:
-    Reimplementation in tensorflow of the Variational Fair Autoencoder
-    https://arxiv.org/abs/1511.00830
-    """
-    d = x1.get_shape().as_list()[1]
-    rW_n = tf.sqrt(2. / bandwidth) * tf.random_normal([d, dim_r]) / np.sqrt(d)
-    rb_u = 2 * np.pi * tf.random_uniform([dim_r])
-    rf0 = tf.sqrt(2. / dim_r) * tf.cos(tf.matmul(x1, rW_n) + rb_u)
-    rf1 = tf.sqrt(2. / dim_r) * tf.cos(tf.matmul(x2, rW_n) + rb_u)
-    result = tf.reduce_sum((tf.reduce_mean(rf0, axis=0) - tf.reduce_mean(rf1, axis=0))**2)
-    return tf.sqrt(result)
-
-def mmd_rbf(x1, x2, bandwidths=1. / (2 * (np.array([1., 2., 5., 8., 10])**2))):
-    """
-    Return the mmd score between a pair of observations
-
-    Notes:
-    Reimplementation in tensorflow of the Variational Fair Autoencoder
-    https://arxiv.org/abs/1511.00830
-    """
-    d1 = x1.get_shape().as_list()[1]
-    d2 = x2.get_shape().as_list()[1]
-    
-    def K(x1, x2, gamma=1.): 
-        dist_table = tf.expand_dims(x1, 0) - tf.expand_dims(x2, 1)
-        return tf.transpose(tf.exp(-gamma * tf.reduce_sum(dist_table **2, axis=2)))
-
-    # possibly mixture of kernels
-    x1x1, x1x2, x2x2 = 0, 0, 0
-    for bandwidth in bandwidths:
-        x1x1 += K(x1, x1, gamma=np.sqrt(d1) * bandwidth) / len(bandwidths)
-        x2x2 += K(x2, x2, gamma=np.sqrt(d2) * bandwidth) / len(bandwidths)
-        x1x2 += K(x1, x2, gamma=np.sqrt(d1) * bandwidth) / len(bandwidths)
-
-    return tf.sqrt(tf.reduce_mean(x1x1) - 2 * tf.reduce_mean(x1x2) + tf.reduce_mean(x2x2))
-
-def mmd_objective(z, s, sdim):
-    """
-    Compute the MMD from latent space and nuisance_id
-
-    Notes:
-    Reimplementation in tensorflow of the Variational Fair Autoencoder
-    https://arxiv.org/abs/1511.00830
-    """
-    
-    #mmd_method = mmd_rbf
-    mmd_method = mmd_fourier
-    
-    z_dim = z.get_shape().as_list()[1]
-
-    # STEP 1: construct lists of samples in their proper batches
-    z_part = tf.dynamic_partition(z, s, sdim)
-
-                
-    # STEP 2: add noise to all of them and get the mmd
-    mmd = 0
-    for j, z_j in enumerate(z_part):
-        z0_ = z_j
-        aux_z0 = tf.random_normal([1, z_dim])  # if an S category does not have any samples
-        z0 = tf.concat([z0_, aux_z0], 0)
-        if len(z_part) == 2:
-            z1_ = z_part[j + 1]
-            aux_z1 = tf.random_normal((1, z_dim))
-            z1 = tf.concat([z1_, aux_z1], axis=0)
-            return mmd_method(z0, z1)
-        z1 = z
-        mmd += mmd_method(z0, z1)
-    return mmd
 
 
 class scVIModel:
