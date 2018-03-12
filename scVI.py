@@ -1,9 +1,8 @@
 """
-Implementation of the single-cell Variational Inference (scVI) paper
-without extensions by Pedro Ferreira
+Implementation of the single-cell Variational Inference (scVI) paper* without extensions
+Pedro Ferreira
 
-Romain Lopez, Jeffrey Regier, Michael Cole, Michael Jordan, Nir Yosef
-EECS, UC Berkeley
+* Romain Lopez, Jeffrey Regier, Michael Cole, Michael Jordan, Nir Yosef, UC Berkeley
 
 """
 
@@ -43,19 +42,21 @@ def gaussian_sample(mean, var, scope=None):
         return sample
 
 
-def log_zinb_positive(x, mu, pi, eps=1e-8):
+def log_zinb_positive(x, mu, r, pi, eps=1e-8):
     """
     log likelihood (scalar) of a minibatch according to a ZINB model.
-    we parametrize the bernoulli using the logits, hence the softplus functions appearing
+    we parametrize the Bernoulli using the logits, hence the softplus functions appearing
 
     Variables:
     mu: mean of the negative binomial (has to be positive support) (shape: minibatch x genes)
+    r: dispersion parameter (positive support) (shape: minibatch x genes)
     pi: logit of the dropout parameter (real support) (shape: minibatch x genes)
     eps: numerical stability constant
     """
-    case_zero = tf.nn.softplus(-pi)
-    case_non_zero = - pi - tf.nn.softplus(- pi) + x * tf.log(mu + eps) - x * tf.log(mu + eps) + \
-                    + tf.lgamma(x) - tf.lgamma(x + 1)
+    case_zero = tf.nn.softplus(- pi + r * tf.log(r + eps) - r * tf.log(r + mu + eps)) - tf.nn.softplus(- pi)
+    case_non_zero = - pi - tf.nn.softplus(- pi) + r * tf.log(r + eps) - r * tf.log(r + mu + eps) \
+                    + x * tf.log(mu + eps) - x * tf.log(r + mu + eps) \
+                    + tf.lgamma(x + r) - tf.lgamma(r) - tf.lgamma(x + 1)
 
     mask = tf.cast(tf.less(x, eps), tf.float32)
     res = tf.multiply(mask, case_zero) + tf.multiply(1 - mask, case_non_zero)
@@ -64,14 +65,15 @@ def log_zinb_positive(x, mu, pi, eps=1e-8):
 
 
 class scVI(object):
-    def __init__(self, n_input=100, n_layers=1, n_hidden=128, n_latent=2, weights_std_init=0.01):
+    def __init__(self, n_input=100, n_layers=1, n_hidden=128, n_latent=2, weights_std_init=0.01, optimizer=tf.train.AdamOptimizer()):
         self.n_input = n_input
         self.n_layers = n_layers
         self.n_hidden = n_hidden
         self.n_latent = n_latent
         self.std = weights_std_init
+        self.optimizer = optimizer
 
-        self.build_model() # build computation graph
+        self.build_model()  # build computation graph
 
         self.sess = tf.InteractiveSession()
         self.sess.run(tf.global_variables_initializer())
@@ -79,10 +81,10 @@ class scVI(object):
     def build_model(self):
         self.x = tf.placeholder(name='x', dtype=tf.float32, shape=[None, self.n_input])
 
-        self.inference_network() # q(z|x)
+        self.inference_network()  # q(z|x)
         self.sampling_latent()
-        self.generative_model() # p(x|z)
-        self.loss() # update network weights
+        self.generative_model()  # p(x|z)
+        self.loss()  # update network weights
 
     def inference_network(self):
         """
@@ -93,8 +95,8 @@ class scVI(object):
         for layer in range(2, self.n_layers + 1):
             h = dense(h, self.n_hidden, activation=tf.nn.relu)
 
-        self.qz_m = dense(h, self.n_latent, activation=None) # variational distribution mean
-        self.qz_v = dense(h, self.n_latent, activation=tf.exp) # variational distribution variance (positive)
+        self.qz_m = dense(h, self.n_latent, activation=None)  # variational distribution mean
+        self.qz_v = dense(h, self.n_latent, activation=tf.exp)  # variational distribution variance (positive)
 
     def sampling_latent(self):
         """
@@ -116,6 +118,9 @@ class scVI(object):
         # mean of gamma distribution
         self.px_scale = dense(h, self.n_input, activation=tf.nn.softmax)
 
+        # dispersion parameter of negative binomial or of gamma
+        self.px_r = tf.Variable(tf.random_normal([self.n_input]), name="r")
+
         # mean of poisson (rate) is the mean of the gamma that parameterizes it
         self.px_rate = self.px_scale
 
@@ -127,7 +132,7 @@ class scVI(object):
         write down the loss and the optimizer
         """
         # VAE loss
-        recon = log_zinb_positive(self.x, self.px_rate, self.px_dropout)
+        recon = log_zinb_positive(self.x, self.px_rate, tf.exp(self.px_r), self.px_dropout)
 
         kl = 0.5 * tf.reduce_sum(tf.square(self.qz_m) + self.qz_v - tf.log(1e-8 + self.qz_v) - 1, 1)
 
@@ -136,6 +141,6 @@ class scVI(object):
         self.loss = - self.ELBO_gau
 
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-        optimizer = self.optimize_algo
+        optimizer = self.optimizer
         with tf.control_dependencies(update_ops):
             self.train_step = optimizer.minimize(self.loss)
