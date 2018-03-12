@@ -134,6 +134,7 @@ class scVI(object):
         # VAE loss
         recon = log_zinb_positive(self.x, self.px_rate, tf.exp(self.px_r), self.px_dropout)
 
+        # KL divergence between two gaussians
         kl = 0.5 * tf.reduce_sum(tf.square(self.qz_m) + self.qz_v - tf.log(1e-8 + self.qz_v) - 1, 1)
 
         self.ELBO_gau = tf.reduce_mean(recon - kl)
