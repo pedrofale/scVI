@@ -84,7 +84,7 @@ class scVI(object):
         self.inference_network()  # q(z|x)
         self.sampling_latent()
         self.generative_model()  # p(x|z)
-        self.loss()  # update network weights
+        self.set_loss()  # update network weights
 
     def inference_network(self):
         """
@@ -127,7 +127,7 @@ class scVI(object):
         # dropout logit
         self.px_dropout = dense(h, self.n_input, activation=None)
 
-    def loss(self):
+    def set_loss(self):
         """
         write down the loss and the optimizer
         """
