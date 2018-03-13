@@ -65,7 +65,9 @@ def log_zinb_positive(x, mu, r, pi, eps=1e-8):
 
 
 class scVI(object):
-    def __init__(self, n_input=100, n_layers=1, n_hidden=128, n_latent=2, weights_std_init=0.01, optimizer=tf.train.AdamOptimizer()):
+    def __init__(self, x_ph, n_input=100, n_layers=1, n_hidden=128, n_latent=2, weights_std_init=0.01, optimizer=tf.train.AdamOptimizer()):
+        self.x = x_ph
+
         self.n_input = n_input
         self.n_layers = n_layers
         self.n_hidden = n_hidden
@@ -76,8 +78,6 @@ class scVI(object):
         self.build_model()  # build computation graph
 
     def build_model(self):
-        self.x = tf.placeholder(name='x', dtype=tf.float32, shape=[None, self.n_input])
-
         self.inference_network()  # q(z|x)
         self.sampling_latent()
         self.generative_model()  # p(x|z)
