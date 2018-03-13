@@ -75,9 +75,6 @@ class scVI(object):
 
         self.build_model()  # build computation graph
 
-        self.sess = tf.InteractiveSession()
-        self.sess.run(tf.global_variables_initializer())
-
     def build_model(self):
         self.x = tf.placeholder(name='x', dtype=tf.float32, shape=[None, self.n_input])
 
